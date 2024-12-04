@@ -5,6 +5,7 @@ go 1.23.3
 require (
 	cloud.google.com/go/cloudtasks v1.13.2
 	github.com/caarlos0/env/v11 v11.2.2
+	github.com/zoftko/gowhat v0.0.0-20241204154531-f0dc0639f629
 )
 
 require (
