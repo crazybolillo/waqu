@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	cloudtasks "cloud.google.com/go/cloudtasks/apiv2"
 	taskspb "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	"context"
+	"encoding/json"
 	"github.com/caarlos0/env/v11"
+	"github.com/zoftko/gowhat/webhook"
 	"io"
 	"log/slog"
 	"net/http"
@@ -18,6 +21,7 @@ type config struct {
 	HttpTarget              string `env:"HTTP_TARGET,required"`
 	HttpTargetAuthorization string `env:"HTTP_TARGET_AUTHORIZATION,required"`
 	Port                    string `env:"PORT" envDefault:"8080"`
+	IgnoreStatus            bool   `env:"IGNORE_STATUS" envDefault:"true"`
 }
 
 func main() {
@@ -53,6 +57,25 @@ func run(ctx context.Context) int {
 	return 0
 }
 
+func isMessageEvent(content io.Reader) (bool, error) {
+	var notification webhook.Notification
+	decoder := json.NewDecoder(content)
+	err := decoder.Decode(&notification)
+	if err != nil {
+		return false, nil
+	}
+
+	for _, entry := range notification.Entry {
+		for _, change := range entry.Changes {
+			if len(change.Value.Messages) > 0 {
+				return true, nil
+			}
+		}
+	}
+
+	return false, nil
+}
+
 func handleRequest(client *cloudtasks.Client, cfg config) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
@@ -67,6 +90,18 @@ func handleRequest(client *cloudtasks.Client, cfg config) func(http.ResponseWrit
 			slog.Error("Failed to read request body", "reason", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
+		}
+
+		if cfg.IgnoreStatus {
+			isMsg, err := isMessageEvent(bytes.NewReader(body))
+			if err != nil {
+				slog.Error("Failed to decode request body", "reason", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if !isMsg {
+				return
+			}
 		}
 
 		req := &taskspb.CreateTaskRequest{
